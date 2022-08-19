@@ -1,4 +1,4 @@
-module github.com/neo4j-graphacademy/neoflix
+module github.com/renatospaka/neoflix
 
 go 1.17
 
