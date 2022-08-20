@@ -5,6 +5,7 @@ import (
 	"math/rand"
 
 	"github.com/renatospaka/neoflix/pkg/fixtures"
+	"github.com/renatospaka/neoflix/pkg/ioutils"
 
 	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/renatospaka/neoflix/pkg/routes/paging"
@@ -48,7 +49,9 @@ func (ms *neo4jMovieService) FindAll(userId string, page *paging.Paging) (_ []Mo
 		AccessMode:       neo4j.AccessModeRead,
 	}
 	session := ms.driver.NewSession(config)
-	defer session.Close()
+	defer func() {
+		err = ioutils.DeferredClose(session, err)
+	}()
 
 	// TODO: Execute a query in a new Read Transaction
 	results, err := session.ReadTransaction(func(tx neo4j.Transaction) (interface{}, error) {
@@ -90,16 +93,10 @@ func (ms *neo4jMovieService) FindAll(userId string, page *paging.Paging) (_ []Mo
 	if err != nil {
 		return nil, err
 	}
+	session.Close()
 
 	// TODO: Close the session
 	return results.([]Movie), nil
-
-	// popularMovies, err := ms.loader.ReadArray("fixtures/popular.json")
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// return fixtures.Slice(popularMovies, page.Skip(), page.Limit()), err
 }
 
 // end::all[]
