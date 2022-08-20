@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"math/rand"
 
 	"github.com/renatospaka/neoflix/pkg/fixtures"
@@ -43,16 +44,62 @@ func NewMovieService(loader *fixtures.FixtureLoader, driver neo4j.Driver) MovieS
 // tag::all[]
 func (ms *neo4jMovieService) FindAll(userId string, page *paging.Paging) (_ []Movie, err error) {
 	// TODO: Open an Session
-	// TODO: Execute a query in a new Read Transaction
-	// TODO: Get a list of Movies from the Result
-	// TODO: Close the session
+	config := neo4j.SessionConfig{
+		AccessMode:       neo4j.AccessModeRead,
+	}
+	session := ms.driver.NewSession(config)
+	defer session.Close()
 
-	popularMovies, err := ms.loader.ReadArray("fixtures/popular.json")
+	// TODO: Execute a query in a new Read Transaction
+	results, err := session.ReadTransaction(func(tx neo4j.Transaction) (interface{}, error) {
+		sort := page.Sort()
+		result, err := tx.Run(
+			fmt.Sprintf(`
+				MATCH (m:Movie)
+				WHERE m.`+"`%[1]s`"+` IS NOT NULL
+				RETURN m { .* } AS movie
+				ORDER BY m.`+"`%[1]s`"+` %s
+				SKIP $skip
+				LIMIT $limit
+				`, 
+				sort,
+				page.Order(),
+			),
+			map[string]interface{} {
+				"skip": page.Skip(),
+				"limit": page.Limit(),
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		records, err := result.Collect()
+		if err != nil {
+			return nil, err
+		}
+
+		// TODO: Get a list of Movies from the Result
+		var results []map[string]interface{}
+		for _, record := range records {
+			movie, _ := record.Get("movie")
+			results = append(results, movie.(map[string]interface{}))
+		}
+		return results, nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return fixtures.Slice(popularMovies, page.Skip(), page.Limit()), err
+	// TODO: Close the session
+	return results.([]Movie), nil
+
+	// popularMovies, err := ms.loader.ReadArray("fixtures/popular.json")
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// return fixtures.Slice(popularMovies, page.Skip(), page.Limit()), err
 }
 
 // end::all[]
