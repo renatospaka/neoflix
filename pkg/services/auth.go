@@ -43,9 +43,7 @@ func NewAuthService(loader *fixtures.FixtureLoader, driver neo4j.Driver, jwtSecr
 //
 // The properties also be used to generate a JWT `token` which should be included
 // with the returned user.
-// tag::register[]
 func (as *neo4jAuthService) Save(email, plainPassword, name string) (_ User, err error) {
-	// TODO: Handle Unique constraints in the database
 	session := as.driver.NewSession(neo4j.SessionConfig{})
 	defer func() {
 		err = ioutils.DeferredClose(session, err)
@@ -102,30 +100,49 @@ func (as *neo4jAuthService) Save(email, plainPassword, name string) (_ User, err
 	return userWithToken(user, token), nil
 }
 
-// end::register[]
-
-// tag::authenticate[]
 func (as *neo4jAuthService) FindOneByEmailAndPassword(email string, password string) (_ User, err error) {
-	// TODO: Authenticate the user from the database
-	if email != "graphacademy@neo4j.com" {
-		return nil, fmt.Errorf("Incorrect username or password")
-	}
+	session := as.driver.NewSession(neo4j.SessionConfig{})
+	defer func() {
+		err = ioutils.DeferredClose(session, err)
+	}()
 
-	user, err := as.loader.ReadObject("fixtures/user.json")
+	result, err := session.ReadTransaction(func(tx neo4j.Transaction) (interface{}, error) {
+		result, err := tx.Run(`
+			MATCH (u:User {email: $email}) RETURN u`,
+			map[string]interface{}{
+				"email": email,
+			})
+		if err != nil {
+			return nil, err
+		}
+
+		record, err := result.Single()
+		if err != nil {
+			return nil, fmt.Errorf("account not found or incorrect password")
+		}
+
+		user, _ := record.Get("u")
+		return user, nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	subject := user["userId"].(string)
+	userNode := result.(neo4j.Node)
+	user := userNode.Props
+	if !verifyPassword(password, user["password"].(string)) {
+		return nil, fmt.Errorf("account not found or incorrect password")
+	}
+
+	subject := userNode.Props["userId"].(string)
+
 	token, err := jwtutils.Sign(subject, userToClaims(user), as.jwtSecret)
 	if err != nil {
 		return nil, err
 	}
-
 	return userWithToken(user, token), nil
 }
 
-// end::authenticate[]
 
 func (as *neo4jAuthService) ExtractUserId(bearer string) (string, error) {
 	if bearer == "" {
