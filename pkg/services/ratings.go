@@ -2,6 +2,7 @@ package services
 
 import (
 	"github.com/renatospaka/neoflix/pkg/fixtures"
+	"github.com/renatospaka/neoflix/pkg/ioutils"
 
 	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/renatospaka/neoflix/pkg/routes/paging"
@@ -30,24 +31,50 @@ func NewRatingService(loader *fixtures.FixtureLoader, driver neo4j.Driver) Ratin
 // in the `order` parameter.
 // Results should be limited to the number passed as `limit`.
 // The `skip` variable should be used to skip a certain number of rows.
-// tag::forMovie[]
 func (rs *neo4jRatingService) FindAllByMovieId(movieId string, page *paging.Paging) (_ []Rating, err error) {
 	return rs.loader.ReadArray("fixtures/ratings.json")
 }
-
-// end::forMovie[]
 
 // Save adds a relationship between a User and Movie with a `rating` property.
 // The `rating` parameter should be converted to a Neo4j Integer.
 //
 // If the User or Movie cannot be found, a NotFoundError should be thrown
-// tag::add[]
 func (rs *neo4jRatingService) Save(rating int, movieId string, userId string) (_ Movie, err error) {
-	// TODO: Open a new session
-	// TODO: Save the rating in the database
-	// TODO: Return movie details and a rating
+	session := rs.driver.NewSession(neo4j.SessionConfig{})
+	defer func() {
+		err = ioutils.DeferredClose(session, err)
+	}()
 
-	return rs.loader.ReadObject("fixtures/goodfellas.json")
+	result, err := session.WriteTransaction(func(tx neo4j.Transaction) (interface{}, error) {
+		result, err := tx.Run(`
+			MATCH (u:User {userId: $userId})
+			MATCH (m:Movie {tmdbId: $movieId})
+
+			MERGE (u)-[r:RATED]->(m)
+			SET r.rating = $rating, r.timestamp = timestamp()
+
+			RETURN m { .*, rating: r.rating } AS movie`, 
+			map[string]interface{}{
+				"userId": userId,
+				"movieId": movieId,
+				"rating": rating,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		record, err := result.Single()
+		if err != nil {
+			return nil, err
+		}
+
+		movie, _ := record.Get("movie")
+		return movie.(map[string]interface{}), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(Movie), nil
 }
-
-// end::add[]
