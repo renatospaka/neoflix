@@ -72,6 +72,16 @@ func (as *neo4jAuthService) Save(email, plainPassword, name string) (_ User, err
 		}
 
 		record, err := result.Single()
+		if neo4jError, ok := err.(*neo4j.Neo4jError); ok && neo4jError.Title() == "ConstraintValidationFailed" {
+			return nil, 
+				NewDomainError(
+					422,
+					fmt.Sprintf("An account already exists with ith the email address %s", email),
+					map[string]interface{}{
+						"email": "email address taken",
+					},
+				)
+		}
 		if err != nil {
 			return nil, err
 		}
