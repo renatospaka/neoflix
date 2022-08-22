@@ -42,9 +42,7 @@ func NewMovieService(loader *fixtures.FixtureLoader, driver neo4j.Driver) MovieS
 //
 // If a userId value is supplied, a `favorite` boolean property should be returned to
 // signify whether the user has added the movie to their "My Favorites" list.
-// tag::all[]
 func (ms *neo4jMovieService) FindAll(userId string, page *paging.Paging) (_ []Movie, err error) {
-	// TODO: Open an Session
 	config := neo4j.SessionConfig{
 		AccessMode:       neo4j.AccessModeRead,
 	}
@@ -53,24 +51,31 @@ func (ms *neo4jMovieService) FindAll(userId string, page *paging.Paging) (_ []Mo
 		err = ioutils.DeferredClose(session, err)
 	}()
 
-	// TODO: Execute a query in a new Read Transaction
 	results, err := session.ReadTransaction(func(tx neo4j.Transaction) (interface{}, error) {
-		sort := page.Sort()
+		favorites, err := getUserFavorites(tx, userId)
+		if err != nil {
+			return nil, err
+		}
+		
 		result, err := tx.Run(
 			fmt.Sprintf(`
 				MATCH (m:Movie)
 				WHERE m.`+"`%[1]s`"+` IS NOT NULL
-				RETURN m { .* } AS movie
+				RETURN m {
+					.*,
+					favorite: m.tmdbId IN $favorites
+				} AS movie
 				ORDER BY m.`+"`%[1]s`"+` %s
 				SKIP $skip
 				LIMIT $limit
 				`, 
-				sort,
+				page.Sort(),
 				page.Order(),
 			),
 			map[string]interface{} {
 				"skip": page.Skip(),
 				"limit": page.Limit(),
+				"favorites": favorites,
 			},
 		)
 		if err != nil {
@@ -82,7 +87,6 @@ func (ms *neo4jMovieService) FindAll(userId string, page *paging.Paging) (_ []Mo
 			return nil, err
 		}
 
-		// TODO: Get a list of Movies from the Result
 		var results []map[string]interface{}
 		for _, record := range records {
 			movie, _ := record.Get("movie")
@@ -95,11 +99,8 @@ func (ms *neo4jMovieService) FindAll(userId string, page *paging.Paging) (_ []Mo
 	}
 	session.Close()
 
-	// TODO: Close the session
 	return results.([]Movie), nil
 }
-
-// end::all[]
 
 // FindAllByGenre should return a paginated list of movies that have a relationship to the
 // supplied Genre.
@@ -220,9 +221,27 @@ func (ms *neo4jMovieService) FindAllBySimilarity(id string, userId string, page 
 
 // getUserFavorites should return a list of tmdbId properties for the movies that
 // the user has added to their 'My Favorites' list.
-// tag::getUserFavorites[]
 func getUserFavorites(tx neo4j.Transaction, userId string) ([]string, error) {
-	return nil, nil
-}
+	if userId == "" {
+		return nil, nil
+	}
 
-// end::getUserFavorites[]
+	results, err := tx.Run(`
+			MATCH (u:User {userId: $userId})-[:HAS_FAVORITE]->(m)
+			RETURN m.tmdbId AS id`, 
+		map[string]interface{}{
+			"userId": userId,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for results.Next() {
+		record := results.Record()
+		id, _ := record.Get("id")
+		ids = append(ids, id.(string))
+	}
+	return ids, nil
+}
