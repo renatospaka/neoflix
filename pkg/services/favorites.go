@@ -41,10 +41,8 @@ func (fs *neo4jFavoriteService) Save(userId, movieId string) (_ Movie, err error
 		result, err := tx.Run(`
 				MATCH (u:User {userId: $userId})
 				MATCH (m:Movie {tmdbId: $movieId})
-
 				MERGE (u)-[r:HAS_FAVORITE]->(m)
 						ON CREATE SET u.createdAt = datetime()
-
 				RETURN m {
 					.*,
 					favorite: true
@@ -66,6 +64,9 @@ func (fs *neo4jFavoriteService) Save(userId, movieId string) (_ Movie, err error
 		movie, _ := record.Get("movie")
 		return movie.(map[string]interface{}), nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	session.Close()
 	
 	return movie.(Movie), nil
@@ -98,6 +99,8 @@ func (fs *neo4jFavoriteService) FindAllByUserId(userId string, page *paging.Pagi
 			page.Order()),
 			map[string]interface{}{
 				"userId": userId,
+				"skip":   page.Skip(),
+				"limit":  page.Limit(),
 			},
 		)
 		if err != nil {
